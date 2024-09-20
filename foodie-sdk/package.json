@@ -1,0 +1,53 @@
+{
+  "name": "Spysdk",
+  "version": "1.0.0",
+  "description": "",
+  "engines": {
+    "node": ">=12",
+    "npm": ">=5"
+  },
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon app.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "aws-sdk": "^2.984.0",
+    "bcrypt": "^5.0.1",
+    "body-parser": "^1.19.0",
+    "cookie-parser": "^1.4.5",
+    "cors": "^2.8.5",
+    "crypto": "^1.0.1",
+    "date-format": "^3.0.0",
+    "dotenv": "^10.0.0",
+    "exceljs": "^4.2.1",
+    "express": "^4.17.1",
+    "fabric-ca-client": "^2.2.12",
+    "fabric-network": "^2.2.12",
+    "helmet": "^4.6.0",
+    "http-status-codes": "^2.1.4",
+    "joi": "^17.5.0",
+    "jsonwebtoken": "^8.5.1",
+    "mongoose": "^5.11.19",
+    "mongoose-paginate-v2": "^1.5.0",
+    "mongoose-sequence": "^5.3.1",
+    "morgan": "^1.10.0",
+    "morgan-json": "^1.1.0",
+    "multer": "^1.4.2",
+    "nanoid": "^3.1.25",
+    "node-cron": "^3.0.0",
+    "passport": "^0.4.1",
+    "passport-jwt": "^4.0.0",
+    "passport-local": "^1.0.0",
+    "qrcode": "^1.4.4",
+    "read-excel-file": "^5.2.8",
+    "swagger-ui-express": "^4.3.0",
+    "uuid": "^8.3.2",
+    "winston": "^3.3.3"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.15"
+  }
+}
