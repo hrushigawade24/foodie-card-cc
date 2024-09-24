@@ -3,7 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
+	"time"
 
+	"github.com/golang/protobuf/ptypes"
+	"github.com/hyperledger/fabric-chaincode-go/shim"
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
@@ -62,6 +66,13 @@ type BURNTXN struct {
 	UserID          string `json:"UserId"`
 	BurnTokenID     string `json:"BurnTokenId"`
 	BurnTokenAmount int    `json:"BurnTokenAmount"`
+}
+
+type HistoryQueryResult struct {
+	Record    *FOODIE   `json:"record"`
+	TxId      string    `json:"txId"`
+	Timestamp time.Time `json:"timestamp"`
+	IsDelete  bool      `json:"isDelete"`
 }
 
 const MINTTXN = "MINTTX"
@@ -371,6 +382,156 @@ func (s *SmartContract) Burn(ctx contractapi.TransactionContextInterface, input 
 	return nil
 }
 
+func (s *SmartContract) GetBalance(ctx contractapi.TransactionContextInterface, user string, id string) (int, error) {
+
+	// Create a composite key for the owner entry
+	var indexName = DOCTYPE + "~Owner"
+	ownerKey, err := ctx.GetStub().CreateCompositeKey(indexName, []string{id, user})
+	if err != nil {
+		return 0, fmt.Errorf("failed to create composite key in add balance: %w", err)
+	}
+	fmt.Println("Owner key for adding balance:", ownerKey)
+
+	// Retrieve the current state from the ledger
+	checkOwnerEntry, err := ctx.GetStub().GetState(ownerKey)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch owner entry: %w", err)
+	}
+	fmt.Println("Current owner entry state:", string(checkOwnerEntry))
+
+	var checkOwner OWNERSTRUCT
+	if checkOwnerEntry != nil {
+		// Unmarshal the existing data from the ledger
+		err = json.Unmarshal(checkOwnerEntry, &checkOwner)
+		if err != nil {
+			return 0, fmt.Errorf("failed to unmarshal existing owner entry: %w", err)
+		}
+		fmt.Printf("Owner balance for user %s is %d - \n", user, checkOwner.Amount)
+	}
+
+	return checkOwner.Amount, nil
+}
+
+// get History foodie
+// list of owners
+// GetQuery retrieves transactions based on the specified owner.
+// It constructs a query string to select documents of type "TRANSFERTXN" for the given owner.
+func (s *SmartContract) GetQuery(ctx contractapi.TransactionContextInterface, owner string) ([]*TXN, error) {
+	// Construct the query string to select transactions for the specified owner.
+	queryString := fmt.Sprintf(`{"selector":{"DocType":"%s"}}`, owner)
+	
+	// Execute the query and get the results.
+	output, err := getQueryResultForQueryString(ctx, queryString)
+	if err != nil {
+		return nil, err // Return an error if the query fails.
+	}
+	fmt.Println(output) // Log the output for debugging.
+	
+	// Return the results of the query.
+	return getQueryResultForQueryString(ctx, queryString)
+}
+
+// GetAllOwners retrieves all transactions associated with a given owner.
+// This function behaves similarly to GetQuery, but is named to imply it retrieves all records for that owner.
+func (s *SmartContract) GetAllOwners(ctx contractapi.TransactionContextInterface, owner string) ([]*TXN, error) {
+	// Construct the query string to select all transactions for the specified owner.
+	queryString := fmt.Sprintf(`{"selector":{"DocType":"%s"}}`, owner)
+	
+	// Execute the query and get the results.
+	output, err := getQueryResultForQueryString(ctx, queryString)
+	if err != nil {
+		return nil, err // Return an error if the query fails.
+	}
+	fmt.Println(output) // Log the output for debugging.
+	
+	// Return the results of the query.
+	return getQueryResultForQueryString(ctx, queryString)
+}
+
+// GetAssetHistory retrieves the history of a specific asset based on its ID.
+// It provides a detailed log of all transactions associated with the asset.
+func (s *SmartContract) GetAssetHistory(ctx contractapi.TransactionContextInterface, assetID string) ([]HistoryQueryResult, error) {
+	log.Printf("GetAssetHistory: ID %v", assetID) // Log the asset ID for tracking.
+
+	// Get the history of the asset using its ID.
+	resultsIterator, err := ctx.GetStub().GetHistoryForKey(assetID)
+	if err != nil {
+		return nil, err // Return an error if the history retrieval fails.
+	}
+	defer resultsIterator.Close() // Ensure the iterator is closed after use.
+
+	var records []HistoryQueryResult // Initialize a slice to hold the history records.
+	for resultsIterator.HasNext() {
+		response, err := resultsIterator.Next() // Retrieve the next result in the iterator.
+		if err != nil {
+			return nil, err // Return an error if fetching the next result fails.
+		}
+
+		var asset FOODIE // Define a variable to hold the asset data.
+		if len(response.Value) > 0 {
+			// Unmarshal the response value into the asset struct if it exists.
+			err = json.Unmarshal(response.Value, &asset)
+			if err != nil {
+				return nil, err // Return an error if unmarshalling fails.
+			}
+		} else {
+			// If there is no value, create a placeholder asset with just the ID.
+			asset = FOODIE{
+				ID: assetID,
+			}
+		}
+
+		// Convert the response timestamp to a proper format.
+		timestamp, err := ptypes.Timestamp(response.Timestamp)
+		if err != nil {
+			return nil, err // Return an error if timestamp conversion fails.
+		}
+
+		// Create a new history record with transaction details.
+		record := HistoryQueryResult{
+			TxId:      response.TxId,
+			Timestamp: timestamp,
+			Record:    &asset,
+			IsDelete:  response.IsDelete,
+		}
+		records = append(records, record) // Add the record to the slice.
+	}
+	fmt.Println("records-", records) // Log the retrieved records for debugging.
+	return records, nil // Return the compiled history records.
+}
+
+// getQueryResultForQueryString executes a query based on the provided query string.
+// It returns the results as a slice of TXN structs.
+func getQueryResultForQueryString(ctx contractapi.TransactionContextInterface, queryString string) ([]*TXN, error) {
+	resultsIterator, err := ctx.GetStub().GetQueryResult(queryString) // Execute the query.
+	if err != nil {
+		return nil, err // Return an error if the query fails.
+	}
+	defer resultsIterator.Close() // Ensure the iterator is closed after use.
+
+	return constructQueryResponseFromIterator(resultsIterator) // Construct and return the response from the iterator.
+}
+
+// constructQueryResponseFromIterator converts query results from the iterator into a slice of TXN structs.
+func constructQueryResponseFromIterator(resultsIterator shim.StateQueryIteratorInterface) ([]*TXN, error) {
+	var assets []*TXN // Initialize a slice to hold the assets.
+	for resultsIterator.HasNext() {
+		queryResult, err := resultsIterator.Next() // Retrieve the next result in the iterator.
+		if err != nil {
+			return nil, err // Return an error if fetching the next result fails.
+		}
+		var asset TXN // Define a variable to hold the asset data.
+		err = json.Unmarshal(queryResult.Value, &asset) // Unmarshal the result value into the asset struct.
+		if err != nil {
+			return nil, err // Return an error if unmarshalling fails.
+		}
+		assets = append(assets, &asset) // Add the asset to the slice.
+	}
+
+	return assets, nil // Return the compiled assets.
+}
+
+
 func addBalance(ctx contractapi.TransactionContextInterface, userId string, id string, amount int) error {
 	var OwnerStruct OWNERSTRUCT
 
@@ -475,59 +636,6 @@ func removeBalance(ctx contractapi.TransactionContextInterface, userId string, i
 
 	return nil
 }
-
-// func burnBalance(ctx contractapi.TransactionContextInterface, userId string, id string, amount int) error {
-
-// 	fmt.Println("-------------------------BurnBalance Fn-------------------------------")
-// 	var OwnerStruct OWNERSTRUCT
-
-// 	// Create a composite key for the owner entry
-// 	var indexName = DOCTYPE + "~Owner"
-// 	ownerKey, err := ctx.GetStub().CreateCompositeKey(indexName, []string{id, userId})
-// 	if err != nil {
-// 		return fmt.Errorf("failed to create composite key in remove balance: %w", err)
-// 	}
-// 	fmt.Println("Owner key for burn balance:", ownerKey)
-
-// 	// Define the owner structure values
-
-// 	// Retrieve the current state from the ledger
-// 	checkOwnerEntry, err := ctx.GetStub().GetState(ownerKey)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	fmt.Println("Current owner entry state for burn:", string(checkOwnerEntry))
-
-// 	var checkOwner OWNERSTRUCT
-// 	if checkOwnerEntry != nil {
-// 		// Unmarshal the existing data from the ledger
-// 		err = json.Unmarshal(checkOwnerEntry, &checkOwner)
-// 		if err != nil {
-// 			return fmt.Errorf("failed to unmarshal existing owner entry: %w", err)
-// 		}
-// 		// Validate that the owner's balance is sufficient for the removal
-// 		fmt.Println("Owner Balance",checkOwner.Amount)
-// 		OwnerStruct.ID = id
-// 		OwnerStruct.UserID = userId
-// 		OwnerStruct.DocType = OWNER
-// 		OwnerStruct.Amount = checkOwner.Amount - amount
-// 		// Update the owner's balance by subtracting the specified amount
-// 	}
-
-// 	// Marshal the updated owner structure for storage
-// 	OwnerAsByte, err := json.Marshal(OwnerStruct)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to marshal owner structure: %w", err)
-// 	}
-
-// 	// Store the updated owner entry in the ledger
-// 	err = ctx.GetStub().PutState(ownerKey, OwnerAsByte)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to put owner state: %v", err)
-// 	}
-// 	fmt.Println("-------------------------BurnBalance Fn-------------------------------")
-// 	return nil
-// }
 
 func main() {
 
